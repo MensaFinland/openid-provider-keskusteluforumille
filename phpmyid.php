@@ -11,6 +11,9 @@
  * @url http://siege.org/projects/phpMyID
  * @version 0.9
  */
+ 
+#Debug:
+#ini_set('display_errors', 'On');
 
 	$wgSMFVersion = "2.0";
 	$wgSMFLogin = true;
@@ -249,12 +252,13 @@ function authorize_mode () {
 	$_SESSION = array();
 	
 	smf_sessionSetup();
+
 	$_SESSION['old_url'] = "http://" . $_SERVER["HTTP_HOST"] . $_SERVER["REQUEST_URI"] . "&board=redirect";
 	$_SESSION['login_url'] = $_SESSION['old_url'];
 	$_SESSION['oid_session'] = $sid;// $oid_session;
 	smf_sessionWrite($_COOKIE['PHPSESSID'], session_encode());
 
-	header('Location: http://www.openlierox.net/forum/index.php?action=login2&sa=salt');
+	header('Location: http://www.mydomain.net/forum/index.php?action=login2&sa=salt');
 }
 
 
@@ -532,7 +536,7 @@ function id_res_mode () {
 	if ($profile['authorized'])
 		wrap_html('You are logged in as ' . $_SESSION['auth_username']);
 
-	wrap_html('You are not logged in');
+	wrap_html('You are not logged in. (Page may have expired.)');
 }
 
 
@@ -586,7 +590,7 @@ function logout_mode () {
 function no_mode () {
 	global $profile;
 
-	wrap_html('This is an OpenID server endpoint. For more information, see http://openid.net/<br/>Server: <b>' . $profile['idp_url'] . '</b><br/>Realm: <b>' . $profile['php_realm'] . '</b><br/><a href="' . $profile['idp_url'] . '?openid.mode=login">Login</a>' . ($profile['allow_test'] === true ? ' | <a href="' . $profile['idp_url'] . '?openid.mode=test">Test</a>' : null));
+	wrap_html('This is an OpenID server endpoint. For more information, see http://openid.net/<br/>Server: <b>' . $profile['idp_url'] . '</b><br/>Realm: <b>' . $profile['php_realm'] . '</b><br/><a href="' . $profile['idp_url'] . (strpos($profile['idp_url'], '?') ? '&' : '?') . 'openid.mode=login">Login</a>' . ($profile['allow_test'] === true ? ' | <a href="' . $profile['idp_url'] . '&openid.mode=test">Test</a>' : null));
 }
 
 
@@ -1517,6 +1521,9 @@ function user_session () {
  */
 function wrap_html ( $message ) {
 	global $charset, $profile;
+	$ensureid = '';
+	if($lxa_logged_in && !strpos($profile['idp_url'], 'u='))
+		$ensureid = (strpos($profile['idp_url'], '?') ? '&' : '?') . "u=" . urlencode($lxa_logged_in);
 
 	header('Content-Type: text/html; charset=' . $charset);
 	echo '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
@@ -1524,10 +1531,15 @@ function wrap_html ( $message ) {
 <head>
 <title>phpMyID</title>
 <link rel="openid.server" href="' . $profile['req_url'] . '" />
-<link rel="openid.delegate" href="' . $profile['idp_url'] . '" />
+<link rel="openid.delegate" href="' . $profile['idp_url'] . $ensureid . '" />
 ' . implode("\n", $profile['opt_headers']) . '
 <meta name="charset" content="' . $charset . '" />
 <meta name="robots" content="noindex,nofollow" />
+<meta http-equiv="cache-control" content="max-age=0" />
+<meta http-equiv="cache-control" content="no-cache" />
+<meta http-equiv="expires" content="0" />
+<meta http-equiv="expires" content="Tue, 01 Jan 1980 1:00:00 GMT" />
+<meta http-equiv="pragma" content="no-cache" />
 </head>
 <body>
 <p>' . $message . '</p>
@@ -1644,7 +1656,7 @@ self_check();
 
 
 function lxa_logged_in() {
-	global $wgAuth, $smf_settings, $smf_map;
+	global $wgAuth, $smf_settings, $smf_map, $sreg;
 
 	$ID_MEMBER = 0;
 
@@ -1684,6 +1696,8 @@ function lxa_logged_in() {
 
 			// Wrong password or not activated - either way, you're going nowhere.
 			$ID_MEMBER = $check && ($user_settings[$smf_map['is_activated']] == 1 || $user_settings[$smf_map['is_activated']] == 11) ? $user_settings[$smf_map['id_member']] : 0;
+			$sreg['fullname'] = ($user_settings[$smf_map['real_name']]);
+			$sreg['email'] = ($user_settings[$smf_map['email_address']]);
 		}
 		else
 			$ID_MEMBER = 0;
@@ -1735,7 +1749,8 @@ if (! array_key_exists('idp_url', $profile)) {
 	if($lxa_logged_in)
 		$profile["idp_url"] .= "?u=" . urlencode($lxa_logged_in);
 	else if(isset($_GET["id"]))
-		$profile["idp_url"] .= "?u=" . $_GET["u"];		
+		$profile["idp_url"] .= "?u=" . $_GET["u"];
+		#$profile["idp_url"];
 }
 
 // Set the default allowance for testing
@@ -1744,7 +1759,7 @@ if (! array_key_exists('allow_test', $profile))
 
 // Set the default allowance for gmp
 if (! array_key_exists('allow_gmp', $profile))
-	$profile['allow_gmp'] = false;
+	$profile['allow_gmp'] = true;
 
 // Set the default force bigmath - BAD IDEA to override this
 if (! array_key_exists('force_bigmath', $profile))
@@ -1776,7 +1791,8 @@ if (! array_key_exists('lifetime', $profile)) {
 
 // Set a default log file
 if (! array_key_exists('logfile', $profile))
-	$profile['logfile'] = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $profile['auth_realm'] . '.debug.log';
+	$profile['logfile'] = 'debug.log';
+#	$profile['logfile'] = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $profile['auth_realm'] . '.debug.log';
 
 
 /*
@@ -1799,6 +1815,7 @@ if (array_key_exists('microid', $profile)) {
 // Determine if I should add pavatar stuff
 if (array_key_exists('pavatar', $profile))
 	$profile['opt_headers'][] = sprintf('<link rel="pavatar" href="%s" />', $profile['pavatar']);
+
 
 /*
  * Do it

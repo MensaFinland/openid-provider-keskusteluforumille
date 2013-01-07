@@ -10,6 +10,7 @@
  * @license http://www.gnu.org/licenses/gpl.html GNU Public License
  * @url http://siege.org/projects/phpMyID
  * @version 0.9
+ * @Some modifications by Thorium, https://github.com/Thorium/smf-openid-server
  */
  
 #Debug:
@@ -74,6 +75,13 @@ $GLOBALS['p'] = '155172898181473697471232257763715539915724801966915404479707' .
 '253359305585439638443';
 
 
+if(!isset($_GET["u"])) 
+	wrap_html('We need your user-ID as query string parameter. http://.../.../?u=(your-id-here) ');
+else {
+	$reqidkey = "lxa_logged_in".md5($_GET["u"]);
+	if(!isset($GLOBALS[$reqidkey])) $GLOBALS[$reqidkey] = lxa_logged_in();
+}
+
 // Runmode functions
 
 /**
@@ -88,7 +96,7 @@ function accept_mode () {
 
 	// the user needs refresh urls in their session to access this mode
 	if (! isset($_SESSION['post_accept_url']) || ! isset($_SESSION['cancel_accept_url']) || ! isset($_SESSION['unaccepted_url']))
-		error_500('You may not access this mode directly.');
+		error_500('Session-variables not set. You may not access this mode directly.');
 
 	// has the user accepted the trust_root?
 	$accepted = @strlen($_REQUEST['accepted'])
@@ -204,7 +212,7 @@ function associate_mode () {
  * @global array $profile
  */
 function authorize_mode () {
-	global $profile, $baseurl, $lxa_logged_in;
+	global $profile, $baseurl;
 
 	// this is a user session
 	user_session();
@@ -222,16 +230,17 @@ function authorize_mode () {
 
 	// the user needs refresh urls in their session to access this mode
 	if (! isset($_SESSION['post_auth_url']) || ! isset($_SESSION['cancel_auth_url']))
-		error_500('You may not access this mode directly.');
+		error_500('Session-variables not set. You may not access this mode directly. If this is the first login, please try again.');
 	
 	$stale = false;
 
 
 	// is the user trying to log in?
-	if ( $lxa_logged_in && $profile['authorized'] === false) {			
-		debug('Authentication successful for SMF user: ' . $lxa_logged_in);
+	$reqidkey = "lxa_logged_in".md5($_GET["u"]);
+	if ( isset($GLOBALS[$reqidkey]) && $GLOBALS[$reqidkey] && $profile['authorized'] === false) {			
+		debug('Authentication successful for SMF user: ' . $GLOBALS[$reqidkey]);
 		debug('User session is: ' . session_id());
-		$_SESSION['auth_username'] = $lxa_logged_in;
+		$_SESSION['auth_username'] = $GLOBALS[$reqidkey];
 		$_SESSION['auth_url'] = $profile['idp_url'];
 		$profile['authorized'] = true;
 
@@ -590,7 +599,7 @@ function logout_mode () {
 function no_mode () {
 	global $profile;
 
-	wrap_html('This is an OpenID server endpoint. For more information, see http://openid.net/<br/>Server: <b>' . $profile['idp_url'] . '</b><br/>Realm: <b>' . $profile['php_realm'] . '</b><br/><a href="' . $profile['idp_url'] . (strpos($profile['idp_url'], '?') ? '&' : '?') . 'openid.mode=login">Login</a>' . ($profile['allow_test'] === true ? ' | <a href="' . $profile['idp_url'] . '&openid.mode=test">Test</a>' : null));
+	wrap_html('This is an OpenID server endpoint. For more information, see http://openid.net/<br/>Server: <b>' . $profile['idp_url'] . '</b><br/>Realm: <b>' . $profile['php_realm'] . '</b><br/><a href="' . $profile['idp_url'] . (strpos($profile['idp_url'], '?') ? '&' : '?') . 'openid.mode=login&u='.$_GET["u"].'">Login</a>' . ($profile['allow_test'] === true ? ' | <a href="' . $profile['idp_url'] . '&openid.mode=test">Test</a>' : null));
 }
 
 
@@ -1522,8 +1531,16 @@ function user_session () {
 function wrap_html ( $message ) {
 	global $charset, $profile;
 	$ensureid = '';
-	if($lxa_logged_in && !strpos($profile['idp_url'], 'u='))
-		$ensureid = (strpos($profile['idp_url'], '?') ? '&' : '?') . "u=" . urlencode($lxa_logged_in);
+
+	$reqidkey = 'none';
+	if(isset($_GET["u"]))
+		$reqidkey = "lxa_logged_in".md5($_GET["u"]);
+
+	if($reqidkey != 'none' && isset($GLOBALS[$reqidkey]) && $GLOBALS[$reqidkey] && !strpos($profile['idp_url'], 'u='))
+		$ensureid = (strpos($profile['idp_url'], '?') ? '&' : '?') . "u=" . urlencode($GLOBALS[$reqidkey]);
+	else
+		if(isset($_GET["u"]))
+			$ensureid = (strpos($profile['idp_url'], '?') ? '&' : '?') . "u=" . $_GET["u"];
 
 	header('Content-Type: text/html; charset=' . $charset);
 	echo '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
@@ -1588,6 +1605,10 @@ function wrap_keyed_redirect ($url, $keys) {
  * @param string $url
  */
 function wrap_redirect ($url) {
+
+	if(isset($_GET["u"]) && !strpos($url, 'u=')){
+		$url .= (strpos($url, '?') ? '&' : '?') . "u=" . $_GET["u"];
+	}
 	header('HTTP/1.1 302 Found');
 	header('Location: ' . $url);
 	debug('Location: ' . $url);
@@ -1710,7 +1731,8 @@ function lxa_logged_in() {
 	return $lxa_logged_in ? $user_settings[$smf_map['member_name']] : null;
 }
 
-$GLOBALS["lxa_logged_in"] = lxa_logged_in();
+$reqidkey = "lxa_logged_in".md5($_GET["u"]);
+if(!isset($GLOBALS[$reqidkey]))$GLOBALS[$reqidkey] = lxa_logged_in();
 
 
 /**
@@ -1742,16 +1764,20 @@ $profile['req_url'] = sprintf("%s://%s%s%s",
 
 $baseurl = explode("?", $profile['req_url']);
 $baseurl = $baseurl[0];
+$reqidkey = "lxa_logged_in".md5($_GET["u"]);
 
 // Set a default IDP URL
 if (! array_key_exists('idp_url', $profile)) {
 	$profile['idp_url'] = $baseurl;
-	if($lxa_logged_in)
-		$profile["idp_url"] .= "?u=" . urlencode($lxa_logged_in);
+	if(isset($GLOBALS[$reqidkey]) && $GLOBALS[$reqidkey])
+		$profile["idp_url"] .= "?u=" . urlencode($GLOBALS[$reqidkey]);
 	else if(isset($_GET["id"]))
 		$profile["idp_url"] .= "?u=" . $_GET["u"];
 		#$profile["idp_url"];
 }
+
+if(isset($_GET["u"]) && isset($GLOBALS[$reqidkey]) && $GLOBALS[$reqidkey] && ($_GET["u"]!=$GLOBALS[$reqidkey]))
+	error_500("User-ids doesn't match: " . $_GET["u"] . " and " . $GLOBALS[$reqidkey]);
 
 // Set the default allowance for testing
 if (! array_key_exists('allow_test', $profile))
